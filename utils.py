@@ -32,31 +32,33 @@ def save_output_images(output_tensors, target_tensors, folder, step=0):
 
 
 class ImageDataset_infer(Dataset):
-    def __init__(self, img_dir, size, lr):
-        self.img_dir = glob.glob(os.path.join(img_dir, '*_0.*'))
-        self.size = size
-        self.lr = lr
+    def __init__(self, lq_dir, ref_dir, mask_dir, size, lr):
+        self.lq_paths = sorted(glob.glob(os.path.join(lq_dir, '*.*')))
+        self.ref_dir  = ref_dir
+        self.mask_dir = mask_dir
+        self.size     = size
+        self.lr       = lr
 
     def __len__(self):
-        return len(self.img_dir)
+        return len(self.lq_paths)
 
     def __getitem__(self, idx):
-        q_img_path = self.img_dir[idx]
-        v_mask_fn  = q_img_path.replace('_0.', '_2_mask.')
-        v_img_path = q_img_path.replace('_0.', '_2.')
+        lq_path   = self.lq_paths[idx]
+        filename  = os.path.basename(lq_path)
+        ref_path  = os.path.join(self.ref_dir,  filename)
+        mask_path = os.path.join(self.mask_dir, filename)
 
-        q_img        = self.preprocess_image(q_img_path, sz=self.lr)
-        q_img_origin = self.preprocess_image(q_img_path, sz=self.size, is_LR=False)
-        v_img        = self.preprocess_image(v_img_path, sz=self.size, is_LR=False)
-        v_mask       = self.preprocess_image(v_mask_fn,  sz=self.size, is_LR=False)
+        lq_img   = self.preprocess_image(lq_path,   sz=self.lr)
+        ref_img  = self.preprocess_image(ref_path,  sz=self.size, is_LR=False)
+        ref_mask = self.preprocess_image(mask_path, sz=self.size, is_LR=False)
 
-        return q_img, v_img, q_img_origin, v_mask, q_img_path, v_img_path
+        return lq_img, ref_img, ref_mask, lq_path
 
     def preprocess_image(self, image_path, sz, is_LR=True):
-        image = Image.open(image_path)
+        image = Image.open(image_path).convert('RGB')
         if is_LR:
             transform = transforms.Compose([
-                transforms.Resize((sz, sz), Image.BICUBIC),
+                transforms.Resize((sz, sz),         Image.BICUBIC),
                 transforms.Resize((sz * 2, sz * 2), Image.BICUBIC),
                 transforms.ToTensor(),
             ])
@@ -69,41 +71,36 @@ class ImageDataset_infer(Dataset):
 
 
 class ImageDataset_prog(Dataset):
-    def __init__(self, img_dir, size, lr, mask='../facial_mask'):
-        self.images = []
-        self.masks  = []
-        for fn in glob.glob(f'{img_dir}/*_0.jpg'):
-            filename = os.path.basename(fn)
-            mask_fn  = f'{mask}/{filename}'
-            if os.path.exists(mask_fn.replace('_0.jpg', '_2.jpg')) and os.path.exists(mask_fn):
-                self.images.append(fn)
-                self.masks.append(mask_fn)
-        self.size = size
-        self.lr   = lr
+    def __init__(self, lq_dir, ref_dir, mask_dir, size, lr):
+        self.lq_paths  = sorted(glob.glob(os.path.join(lq_dir, '*.*')))
+        self.ref_dir   = ref_dir
+        self.mask_dir  = mask_dir
+        self.size      = size
+        self.lr        = lr
 
     def __len__(self):
-        return len(self.images)
+        return len(self.lq_paths)
 
     def __getitem__(self, idx):
-        q_img_path  = self.images[idx]
-        v_img_path  = q_img_path.replace('_0.jpg', '_2.jpg')
-        q_mask_fn   = self.masks[idx]
-        v_mask_fn   = q_mask_fn.replace('_0.jpg', '_2.jpg')
+        lq_path   = self.lq_paths[idx]
+        filename  = os.path.basename(lq_path)
+        ref_path  = os.path.join(self.ref_dir,  filename)
+        mask_path = os.path.join(self.mask_dir, filename)
 
-        q_img         = self.preprocess_image(q_img_path, sz=self.lr)
-        q_img_origin  = self.preprocess_image(q_img_path, sz=self.size, is_LR=False)
-        v_img         = self.preprocess_image(v_img_path, sz=self.size, is_LR=False)
-        q_mask        = self.preprocess_image(q_mask_fn,  sz=self.lr)
-        q_mask_origin = self.preprocess_image(q_mask_fn,  sz=self.size, is_LR=False)
-        v_mask        = self.preprocess_image(v_mask_fn,  sz=self.size, is_LR=False)
+        q_img         = self.preprocess_image(lq_path,   sz=self.lr)
+        q_img_origin  = self.preprocess_image(lq_path,   sz=self.size, is_LR=False)
+        v_img         = self.preprocess_image(ref_path,  sz=self.size, is_LR=False)
+        q_mask        = self.preprocess_image(mask_path, sz=self.lr)
+        q_mask_origin = self.preprocess_image(mask_path, sz=self.size, is_LR=False)
+        v_mask        = self.preprocess_image(mask_path, sz=self.size, is_LR=False)
 
-        return q_img, v_img, q_img_origin, q_mask, v_mask, q_mask_origin, q_img_path, v_img_path
+        return q_img, v_img, q_img_origin, q_mask, v_mask, q_mask_origin, lq_path, ref_path
 
     def preprocess_image(self, image_path, sz, is_LR=True):
-        image = Image.open(image_path)
+        image = Image.open(image_path).convert('RGB')
         if is_LR:
             transform = transforms.Compose([
-                transforms.Resize((sz, sz), Image.BICUBIC),
+                transforms.Resize((sz, sz),         Image.BICUBIC),
                 transforms.Resize((sz * 2, sz * 2), Image.BICUBIC),
                 transforms.ToTensor(),
             ])
@@ -117,7 +114,6 @@ class ImageDataset_prog(Dataset):
 
 class ImageDataset(Dataset):
     def __init__(self, img_dir, size):
-        self.img_dir  = img_dir
         self.q_images = sorted([os.path.join(img_dir, f) for f in os.listdir(img_dir) if '_0.jpg' in f])
         self.k_images = sorted([os.path.join(img_dir, f) for f in os.listdir(img_dir) if '_2.jpg' in f])
         self.size     = size
@@ -141,7 +137,7 @@ class ImageDataset(Dataset):
         image = Image.open(image_path)
         if is_LR:
             transform = transforms.Compose([
-                transforms.Resize((sz, sz), Image.BICUBIC),
+                transforms.Resize((sz, sz),         Image.BICUBIC),
                 transforms.Resize((sz * 2, sz * 2), Image.BICUBIC),
                 transforms.ToTensor(),
             ])

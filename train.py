@@ -2,33 +2,40 @@ import os
 import argparse
 import torch
 import numpy as np
-import random
 from utils import *
 from torch.nn.functional import interpolate
 from model_cls import Net
 from model_dis import Discriminator
 from torch import nn, optim
 import torch.nn.functional as F
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, random_split
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 
 
-
 parser = argparse.ArgumentParser(description='RGFormer Training')
-parser.add_argument('--data_root',   type=str, required=True,
-                    help='Root directory containing Train/ and Test/ subdirectories')
+
+parser.add_argument('--lq_dir',   type=str, required=True,
+                    help='Directory containing LR input images')
+parser.add_argument('--ref_dir',  type=str, required=True,
+                    help='Directory containing reference images (same filename as LR)')
+parser.add_argument('--mask_dir', type=str, required=True,
+                    help='Directory containing mask images (same filename as LR)')
 parser.add_argument('--save_path',   type=str, default='./results')
 parser.add_argument('--check_path',  type=str, default=None,
                     help='Path to checkpoint .pt file (optional)')
-parser.add_argument('--target_size', type=int, default=256)
-parser.add_argument('--batch_size',  type=int, default=32)
-parser.add_argument('--max_epoch',   type=int, default=150)
+
+# Training
+parser.add_argument('--target_size', type=int,   default=256)
+parser.add_argument('--batch_size',  type=int,   default=32)
+parser.add_argument('--max_epoch',   type=int,   default=150)
 parser.add_argument('--lr',          type=float, default=1e-4)
+parser.add_argument('--val_split',   type=float, default=0.1,
+                    help='Validation split ratio (default: 0.1)')
 args = parser.parse_args()
 
 
-input_size        = 32  
+input_size        = 32
 train_target_size = 128
 train_input_size  = 64
 
@@ -36,22 +43,21 @@ divides    = {1024: 1, 512: 1, 256: 2, 128: 2, 64: 4, 32: 8}
 patch_dict = {32: 4, 64: 8, 128: 8, 256: 16, 512: 16, 1024: 32}
 dim_dict   = {32: 64, 64: 128, 128: 128, 256: 256, 512: 256, 1024: 512}
 divide     = divides[args.target_size]
-## End
-
-img_dir     = os.path.join(args.data_root, 'Train', 'GT_TPS_Ref_1024')
-val_img_dir = os.path.join(args.data_root, 'Test',  'GT_TPS_Ref_1024')
 
 os.makedirs(args.save_path, exist_ok=True)
 tensorboard_log_dir = os.path.join(args.save_path, 'log')
 os.makedirs(tensorboard_log_dir, exist_ok=True)
 
-writer = SummaryWriter(log_dir=tensorboard_log_dir)
+writer      = SummaryWriter(log_dir=tensorboard_log_dir)
 global_step = 0
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-dataset     = ImageDataset_prog(img_dir,     args.target_size, lr=input_size // 2)
-val_dataset = ImageDataset_prog(val_img_dir, args.target_size, lr=input_size // 2)
+datasets = ImageDataset_prog(args.lq_dir, args.ref_dir, args.mask_dir, args.target_size, lr=input_size // 2)
+
+val_size   = int(len(datasets) * args.val_split)
+train_size = len(datasets) - val_size
+dataset, val_dataset = random_split(datasets, [train_size, val_size])
 
 train_loader = DataLoader(dataset,     batch_size=args.batch_size, shuffle=True)
 val_loader   = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False)
@@ -136,7 +142,7 @@ for epoch in tqdm(range(args.max_epoch), desc="Epochs"):
         loss_d.backward()
         optimizer_d.step()
 
-        # Generator update
+        # Generator 
         optimizer_g.zero_grad()
         g_loss, l1loss = 0, 0
         for out, tar, q_m, discriminator in zip(outputs, targets, q_masks, t_Dis):
