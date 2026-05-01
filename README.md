@@ -36,7 +36,7 @@ cd ..
 
 ## Pretrained Weights
 
-Download the pretrained weights from [Google Drive](https://drive.google.com/your-link-here) and place them in the `weights/` directory.
+Download the pretrained weights from [Google Drive](https://drive.google.com/file/d/13wuwck1Wk9ZkBHI_iCf17Os-JGvmjQ_x/view?usp=drive_link) and place them in the `weights/` directory.
 
 ```
 weights/
